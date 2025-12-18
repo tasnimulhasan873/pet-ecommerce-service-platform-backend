@@ -1039,6 +1039,80 @@ async function connectToDatabase() {
       }
     });
 
+       // Remove item from wishlist
+    app.delete("/api/wishlist/remove", async (req, res) => {
+      try {
+        const { userEmail, productId } = req.body;
+
+
+        if (!userEmail || !productId) {
+          return res.status(400).json({ success: false, message: "User email and product ID are required" });
+        }
+
+
+        const result = await wishlistCollection.deleteOne({ userEmail, productId });
+
+
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ success: false, message: "Item not found in wishlist" });
+        }
+
+
+        res.json({ success: true, message: "Item removed from wishlist" });
+      } catch (error) {
+        console.error("Error removing from wishlist:", error);
+        res.status(500).json({ success: false, message: "Error removing item" });
+      }
+    });
+
+
+    // Clear entire wishlist
+    app.delete("/api/wishlist/clear/:email", async (req, res) => {
+      try {
+        const { email } = req.params;
+
+
+        if (!email) {
+          return res.status(400).json({ success: false, message: "Email is required" });
+        }
+
+
+        await wishlistCollection.deleteMany({ userEmail: email });
+        res.json({ success: true, message: "Wishlist cleared" });
+      } catch (error) {
+        console.error("Error clearing wishlist:", error);
+        res.status(500).json({ success: false, message: "Error clearing wishlist" });
+      }
+    });
+
+
+    // Check wishlist status for multiple products
+    app.post("/api/wishlist/check", async (req, res) => {
+      try {
+        const { userEmail, productIds } = req.body;
+
+
+        if (!userEmail || !Array.isArray(productIds)) {
+          return res.status(400).json({ success: false, message: "User email and product IDs array are required" });
+        }
+
+
+        const wishlistItems = await wishlistCollection
+          .find({
+            userEmail,
+            productId: { $in: productIds }
+          })
+          .toArray();
+
+
+        const wishlistedIds = wishlistItems.map(item => item.productId);
+        res.json({ success: true, wishlistedIds });
+      } catch (error) {
+        console.error("Error checking wishlist status:", error);
+        res.status(500).json({ success: false, message: "Error checking wishlist" });
+      }
+    });
+
 
     // ====================================
     // COUPON ROUTES
