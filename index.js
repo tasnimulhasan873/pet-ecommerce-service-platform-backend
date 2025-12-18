@@ -64,6 +64,7 @@ let couponsCollection;
 let ordersCollection;
 let appointmentsCollection;
 let productsCollection;
+let wishlistCollection;
 
 // Track connection state
 let isConnected = false;
@@ -177,6 +178,7 @@ async function connectToDatabase() {
     appointmentsCollection = db.collection("appointments");
     productsCollection = db.collection("products");
     communityCollection = db.collection("communityPosts");
+    wishlistCollection = db.collection("wishlists");
 
     // Create unique index on transactionId to prevent duplicate orders
     try {
@@ -962,10 +964,142 @@ async function connectToDatabase() {
         res.status(500).json({ success: false, message: "Error clearing cart" });
       }
     });
+    // ====================================
+    // WISHLIST ROUTES
+  
+    // Toggle wishlist item (add/remove)
+    app.post("/api/wishlist/toggle", async (req, res) => {
+      try {
+        const { userEmail, productId, productSnapshot } = req.body;
+
+        if (!userEmail || !productId) {
+          return res.status(400).json({ success: false, message: "User email and product ID are required" });
+        }
+
+        // Check if item already exists in wishlist
+        const existingItem = await wishlistCollection.findOne({
+          userEmail,
+          productId
+        });
+
+        if (existingItem) {
+          // Remove from wishlist
+          await wishlistCollection.deleteOne({ userEmail, productId });
+          return res.json({
+            success: true,
+            action: "removed",
+            message: "Product removed from wishlist"
+          });
+        } else {
+          // Add to wishlist
+          const wishlistItem = {
+            userEmail,
+            productId,
+            productSnapshot: productSnapshot || {},
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
+
+          await wishlistCollection.insertOne(wishlistItem);
+          return res.json({
+            success: true,
+            action: "added",
+            message: "Product added to wishlist"
+          });
+        }
+      } catch (error) {
+        console.error("Error toggling wishlist:", error);
+        res.status(500).json({ success: false, message: "Error updating wishlist" });
+      }
+    });
+
+    // Get user's wishlist
+    app.get("/api/wishlist/:email", async (req, res) => {
+      try {
+        const { email } = req.params;
+
+        if (!email) {
+          return res.status(400).json({ success: false, message: "Email is required" });
+        }
+
+        const wishlist = await wishlistCollection
+          .find({ userEmail: email })
+          .sort({ createdAt: -1 })
+          .toArray();
+
+        res.json({ success: true, wishlist });
+      } catch (error) {
+        console.error("Error fetching wishlist:", error);
+        res.status(500).json({ success: false, message: "Error fetching wishlist" });
+      }
+    });
+
+    // Remove item from wishlist
+    app.delete("/api/wishlist/remove", async (req, res) => {
+      try {
+        const { userEmail, productId } = req.body;
+
+        if (!userEmail || !productId) {
+          return res.status(400).json({ success: false, message: "User email and product ID are required" });
+        }
+
+        const result = await wishlistCollection.deleteOne({ userEmail, productId });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ success: false, message: "Item not found in wishlist" });
+        }
+
+        res.json({ success: true, message: "Item removed from wishlist" });
+      } catch (error) {
+        console.error("Error removing from wishlist:", error);
+        res.status(500).json({ success: false, message: "Error removing item" });
+      }
+    });
+
+    // Clear entire wishlist
+    app.delete("/api/wishlist/clear/:email", async (req, res) => {
+      try {
+        const { email } = req.params;
+
+        if (!email) {
+          return res.status(400).json({ success: false, message: "Email is required" });
+        }
+
+        await wishlistCollection.deleteMany({ userEmail: email });
+        res.json({ success: true, message: "Wishlist cleared" });
+      } catch (error) {
+        console.error("Error clearing wishlist:", error);
+        res.status(500).json({ success: false, message: "Error clearing wishlist" });
+      }
+    });
+
+    // Check wishlist status for multiple products
+    app.post("/api/wishlist/check", async (req, res) => {
+      try {
+        const { userEmail, productIds } = req.body;
+
+        if (!userEmail || !Array.isArray(productIds)) {
+          return res.status(400).json({ success: false, message: "User email and product IDs array are required" });
+        }
+
+        const wishlistItems = await wishlistCollection
+          .find({
+            userEmail,
+            productId: { $in: productIds }
+          })
+          .toArray();
+
+        const wishlistedIds = wishlistItems.map(item => item.productId);
+        res.json({ success: true, wishlistedIds });
+      } catch (error) {
+        console.error("Error checking wishlist status:", error);
+        res.status(500).json({ success: false, message: "Error checking wishlist" });
+      }
+    });
 
     // ====================================
     // COUPON ROUTES
-    // ====================================
+    // ===================================="
 
     // Apply coupon
     app.post("/coupon/apply", async (req, res) => {
@@ -2570,7 +2704,6 @@ async function connectToDatabase() {
         res.status(500).json({ success: false, message: "Failed to load appointment payments" });
       }
     });
-
     // Get order payments analytics (admin)
     app.get("/api/admin/payments/orders", async (req, res) => {
       try {
@@ -2608,9 +2741,7 @@ async function connectToDatabase() {
         res.status(500).json({ success: false, message: "Failed to load order payments" });
       }
     });
-
     // ========== PRODUCT MANAGEMENT API ==========
-
     // Get all products (public route)
     app.get("/api/products", async (req, res) => {
       try {
@@ -2701,7 +2832,6 @@ async function connectToDatabase() {
         res.status(500).json({ success: false, message: "Failed to delete product" });
       }
     });
-
     // Admin: Update product stock
     app.patch("/api/admin/products/:id/stock", async (req, res) => {
       try {
@@ -2786,7 +2916,6 @@ async function connectToDatabase() {
         res.status(500).json({ success: false, message: "Failed to load posts" });
       }
     });
-
     // Admin: Get all community posts
     app.get("/api/admin/community-posts", async (req, res) => {
       try {
@@ -2801,7 +2930,6 @@ async function connectToDatabase() {
         res.status(500).json({ success: false, message: "Failed to load posts" });
       }
     });
-
     // Admin: Create new community post
     app.post("/api/admin/community", async (req, res) => {
       try {
@@ -2814,7 +2942,6 @@ async function connectToDatabase() {
             message: "Title and description are required"
           });
         }
-
         const newPost = {
           imageURL: imageURL || "",
           title,
@@ -2887,7 +3014,7 @@ async function connectToDatabase() {
   }
 }
 
-// Initialize database connection and routes
+
 connectToDatabase().catch(console.error);
 
 // Health check route
@@ -2899,5 +3026,5 @@ app.get("/", (req, res) => {
   });
 });
 
-// Export the Express app for Vercel
+
 module.exports = app;
