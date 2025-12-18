@@ -1015,6 +1015,30 @@ async function connectToDatabase() {
       }
     });
 
+     // Get user's wishlist
+    app.get("/api/wishlist/:email", async (req, res) => {
+      try {
+        const { email } = req.params;
+
+
+        if (!email) {
+          return res.status(400).json({ success: false, message: "Email is required" });
+        }
+
+
+        const wishlist = await wishlistCollection
+          .find({ userEmail: email })
+          .sort({ createdAt: -1 })
+          .toArray();
+
+
+        res.json({ success: true, wishlist });
+      } catch (error) {
+        console.error("Error fetching wishlist:", error);
+        res.status(500).json({ success: false, message: "Error fetching wishlist" });
+      }
+    });
+
 
     // ====================================
     // COUPON ROUTES
