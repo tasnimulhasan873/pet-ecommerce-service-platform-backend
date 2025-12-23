@@ -180,8 +180,6 @@ async function connectToDatabase() {
     communityCollection = db.collection("communityPosts");
     wishlistCollection = db.collection("wishlists");
 
-     wishlistCollection = db.collection("wishlists")
-
     // Create unique index on transactionId to prevent duplicate orders
     try {
       await ordersCollection.createIndex(
@@ -966,9 +964,11 @@ async function connectToDatabase() {
         res.status(500).json({ success: false, message: "Error clearing cart" });
       }
     });
+
     // ====================================
     // WISHLIST ROUTES
-  
+    // ====================================
+
     // Toggle wishlist item (add/remove)
     app.post("/api/wishlist/toggle", async (req, res) => {
       try {
@@ -1098,155 +1098,6 @@ async function connectToDatabase() {
         res.status(500).json({ success: false, message: "Error checking wishlist" });
       }
     });
-
-      // Toggle wishlist item (add/remove)
-    app.post("/api/wishlist/toggle", async (req, res) => {
-      try {
-        const { userEmail, productId, productSnapshot } = req.body;
-
-
-        if (!userEmail || !productId) {
-          return res.status(400).json({ success: false, message: "User email and product ID are required" });
-        }
-
-
-        // Check if item already exists in wishlist
-        const existingItem = await wishlistCollection.findOne({
-          userEmail,
-          productId
-        });
-
-
-        if (existingItem) {
-          // Remove from wishlist
-          await wishlistCollection.deleteOne({ userEmail, productId });
-          return res.json({
-            success: true,
-            action: "removed",
-            message: "Product removed from wishlist"
-          });
-        } else {
-          // Add to wishlist
-          const wishlistItem = {
-            userEmail,
-            productId,
-            productSnapshot: productSnapshot || {},
-            createdAt: new Date(),
-            updatedAt: new Date()
-          };
-
-
-          await wishlistCollection.insertOne(wishlistItem);
-          return res.json({
-            success: true,
-            action: "added",
-            message: "Product added to wishlist"
-          });
-        }
-      } catch (error) {
-        console.error("Error toggling wishlist:", error);
-        res.status(500).json({ success: false, message: "Error updating wishlist" });
-      }
-    });
-
-     // Get user's wishlist
-    app.get("/api/wishlist/:email", async (req, res) => {
-      try {
-        const { email } = req.params;
-
-
-        if (!email) {
-          return res.status(400).json({ success: false, message: "Email is required" });
-        }
-
-
-        const wishlist = await wishlistCollection
-          .find({ userEmail: email })
-          .sort({ createdAt: -1 })
-          .toArray();
-
-
-        res.json({ success: true, wishlist });
-      } catch (error) {
-        console.error("Error fetching wishlist:", error);
-        res.status(500).json({ success: false, message: "Error fetching wishlist" });
-      }
-    });
-
-       // Remove item from wishlist
-    app.delete("/api/wishlist/remove", async (req, res) => {
-      try {
-        const { userEmail, productId } = req.body;
-
-
-        if (!userEmail || !productId) {
-          return res.status(400).json({ success: false, message: "User email and product ID are required" });
-        }
-
-
-        const result = await wishlistCollection.deleteOne({ userEmail, productId });
-
-
-        if (result.deletedCount === 0) {
-          return res.status(404).json({ success: false, message: "Item not found in wishlist" });
-        }
-
-
-        res.json({ success: true, message: "Item removed from wishlist" });
-      } catch (error) {
-        console.error("Error removing from wishlist:", error);
-        res.status(500).json({ success: false, message: "Error removing item" });
-      }
-    });
-
-
-    // Clear entire wishlist
-    app.delete("/api/wishlist/clear/:email", async (req, res) => {
-      try {
-        const { email } = req.params;
-
-
-        if (!email) {
-          return res.status(400).json({ success: false, message: "Email is required" });
-        }
-
-
-        await wishlistCollection.deleteMany({ userEmail: email });
-        res.json({ success: true, message: "Wishlist cleared" });
-      } catch (error) {
-        console.error("Error clearing wishlist:", error);
-        res.status(500).json({ success: false, message: "Error clearing wishlist" });
-      }
-    });
-
-
-    // Check wishlist status for multiple products
-    app.post("/api/wishlist/check", async (req, res) => {
-      try {
-        const { userEmail, productIds } = req.body;
-
-
-        if (!userEmail || !Array.isArray(productIds)) {
-          return res.status(400).json({ success: false, message: "User email and product IDs array are required" });
-        }
-
-
-        const wishlistItems = await wishlistCollection
-          .find({
-            userEmail,
-            productId: { $in: productIds }
-          })
-          .toArray();
-
-
-        const wishlistedIds = wishlistItems.map(item => item.productId);
-        res.json({ success: true, wishlistedIds });
-      } catch (error) {
-        console.error("Error checking wishlist status:", error);
-        res.status(500).json({ success: false, message: "Error checking wishlist" });
-      }
-    });
-
 
     // ====================================
     // COUPON ROUTES
@@ -1769,6 +1620,69 @@ async function connectToDatabase() {
           });
         }
 
+        // ========== VALIDATE DOCTOR AVAILABILITY ==========
+
+        // Fetch doctor details from database
+        const doctor = await usersCollection.findOne({
+          $or: [
+            { _id: ObjectId.isValid(doctorId) ? new ObjectId(doctorId) : null },
+            { userEmail: doctorEmail }
+          ],
+          role: "doctor"
+        });
+
+        if (!doctor) {
+          return res.status(404).json({
+            success: false,
+            message: "Doctor not found"
+          });
+        }
+
+        // Check if doctor has availability settings
+        if (!doctor.availableDays || doctor.availableDays.length === 0) {
+          // If no availability set, allow booking (backward compatibility)
+          console.log("⚠️ Doctor has no availability settings, allowing booking");
+        } else {
+          // Validate selected date matches available days
+          const selectedDateObj = new Date(selectedDate);
+          const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+          const selectedDayName = dayNames[selectedDateObj.getDay()];
+
+          if (!doctor.availableDays.includes(selectedDayName)) {
+            return res.status(400).json({
+              success: false,
+              message: `Doctor is not available on ${selectedDayName}. Available days: ${doctor.availableDays.join(", ")}`
+            });
+          }
+
+          // Validate selected time is within available time range
+          if (doctor.availableTimeStart && doctor.availableTimeEnd) {
+            // Convert 12-hour time to 24-hour for comparison
+            const convertTo24Hour = (time12h) => {
+              const [time, period] = time12h.split(" ");
+              let [hours, minutes] = time.split(":").map(Number);
+
+              if (period === "PM" && hours !== 12) hours += 12;
+              if (period === "AM" && hours === 12) hours = 0;
+
+              return hours * 60 + minutes; // Return total minutes
+            };
+
+            const selectedTimeMinutes = convertTo24Hour(selectedTime);
+            const [startHour, startMin] = doctor.availableTimeStart.split(":").map(Number);
+            const [endHour, endMin] = doctor.availableTimeEnd.split(":").map(Number);
+            const startMinutes = startHour * 60 + startMin;
+            const endMinutes = endHour * 60 + endMin;
+
+            if (selectedTimeMinutes < startMinutes || selectedTimeMinutes >= endMinutes) {
+              return res.status(400).json({
+                success: false,
+                message: `Selected time is outside doctor's available hours (${doctor.availableTimeStart} - ${doctor.availableTimeEnd})`
+              });
+            }
+          }
+        }
+
         // Check if account details are complete (using email)
         const isComplete = await isAccountDetailsComplete(userEmail);
         if (!isComplete) {
@@ -1789,12 +1703,21 @@ async function connectToDatabase() {
           });
         }
 
-        // Convert BDT fee to USD for Stripe
-        const feeUSD = bdtToUsd(doctorFee);
+        // doctorFee is already in USD from frontend
+        // Ensure it's a valid number
+        const feeUSD = parseFloat(doctorFee);
+        const feeBDT = usdToBdt(feeUSD);
 
-        // Create Payment Intent
+        if (isNaN(feeUSD) || feeUSD <= 0) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid consultation fee"
+          });
+        }
+
+        // Create Payment Intent with USD amount
         const paymentIntent = await stripe.paymentIntents.create({
-          amount: Math.round(feeUSD * 100), // Convert to cents
+          amount: Math.round(feeUSD * 100), // Convert USD to cents for Stripe
           currency: "usd",
           metadata: {
             type: "appointment",
@@ -1805,7 +1728,7 @@ async function connectToDatabase() {
             appointmentTime: selectedTime,
             userId,
             userEmail,
-            feeBDT: doctorFee.toString(),
+            feeBDT: feeBDT.toString(),
             feeUSD: feeUSD.toString(),
           },
         });
@@ -2855,6 +2778,7 @@ async function connectToDatabase() {
         res.status(500).json({ success: false, message: "Failed to load appointment payments" });
       }
     });
+
     // Get order payments analytics (admin)
     app.get("/api/admin/payments/orders", async (req, res) => {
       try {
@@ -2892,7 +2816,9 @@ async function connectToDatabase() {
         res.status(500).json({ success: false, message: "Failed to load order payments" });
       }
     });
+
     // ========== PRODUCT MANAGEMENT API ==========
+
     // Get all products (public route)
     app.get("/api/products", async (req, res) => {
       try {
@@ -2983,6 +2909,7 @@ async function connectToDatabase() {
         res.status(500).json({ success: false, message: "Failed to delete product" });
       }
     });
+
     // Admin: Update product stock
     app.patch("/api/admin/products/:id/stock", async (req, res) => {
       try {
@@ -3067,6 +2994,7 @@ async function connectToDatabase() {
         res.status(500).json({ success: false, message: "Failed to load posts" });
       }
     });
+
     // Admin: Get all community posts
     app.get("/api/admin/community-posts", async (req, res) => {
       try {
@@ -3081,6 +3009,7 @@ async function connectToDatabase() {
         res.status(500).json({ success: false, message: "Failed to load posts" });
       }
     });
+
     // Admin: Create new community post
     app.post("/api/admin/community", async (req, res) => {
       try {
@@ -3093,6 +3022,7 @@ async function connectToDatabase() {
             message: "Title and description are required"
           });
         }
+
         const newPost = {
           imageURL: imageURL || "",
           title,
@@ -3165,7 +3095,7 @@ async function connectToDatabase() {
   }
 }
 
-
+// Initialize database connection and routes
 connectToDatabase().catch(console.error);
 
 // Health check route
@@ -3177,5 +3107,5 @@ app.get("/", (req, res) => {
   });
 });
 
-
+// Export the Express app for Vercel
 module.exports = app;
